@@ -1,10 +1,7 @@
 #include "Arduino.h"
-#include <FS.h>
 #include <SPIFFS.h>
 #include <JPEGDecoder.h>
-
 #include "JPEG_functions.h"
-
 #include "TFT_eSPI.h"
 
 extern TFT_eSPI tft;

@@ -10,45 +10,8 @@
 //====================================================================================
 
 #include "Arduino.h"
-#include <FS.h>
 #include <SPIFFS.h>
-
 #include "SPIFFS_functions.h"
-
-#ifdef ARDUINO_ARCH_ESP8266
-void listFiles(void) {
-  Serial.println();
-  Serial.println("SPIFFS files found:");
-
-  fs::Dir dir = SPIFFS.openDir("/"); // Root directory
-  String  line = "=====================================";
-
-  Serial.println(line);
-  Serial.println("  File name               Size");
-  Serial.println(line);
-
-  while (dir.next()) {
-    String fileName = dir.fileName();
-    Serial.print(fileName);
-    int spaces = 21 - fileName.length(); // Tabulate nicely
-    while (spaces--) Serial.print(" ");
-
-    fs::File f = dir.openFile("r");
-    String fileSize = (String) f.size();
-    spaces = 10 - fileSize.length(); // Tabulate nicely
-    while (spaces--) Serial.print(" ");
-    Serial.println(fileSize + " bytes");
-  }
-
-  Serial.println(line);
-  Serial.println();
-  delay(1000);
-}
-#endif
-
-//====================================================================================
-
-#ifdef ESP32
 
 void listFiles(void) {
   listDir(SPIFFS, "/", 0);
@@ -104,4 +67,3 @@ void listDir(fs::FS &fs, const char * dirname, uint8_t levels) {
   Serial.println();
   delay(1000);
 }
-#endif

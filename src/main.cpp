@@ -73,23 +73,13 @@
 //====================================================================================
 
 #include <Arduino.h> // Needed for platformio
-
-// Call up the SPIFFS FLASH filing system this is part of the ESP Core
-#define FS_NO_GLOBALS
-#include <FS.h>
-
-#ifdef ESP32
-  #include "SPIFFS.h" // ESP32 only
-#endif
-
-// JPEG decoder library
-#include <JPEGDecoder.h>
-
+#include "SPIFFS.h" // ESP32 only
 #include <TFT_eSPI.h>      // Hardware-specific library
-
 #include "JPEG_functions.h" // Include the support functions
 #include "SPIFFS_functions.h" // Include the support functions
 
+// Call up the SPIFFS FLASH filing system this is part of the ESP Core
+#define FS_NO_GLOBALS
 
 TFT_eSPI tft = TFT_eSPI(); // Invoke custom library
 
@@ -123,6 +113,8 @@ void loop()
 {
   // Note the / before the SPIFFS file name must be present, this means the file is in
   // the root directory of the SPIFFS, e.g. "/tiger.jpg" for a file called "tiger.jpg"
+  SPIFFS.open("text.txt");
+  
 
   tft.setRotation(0);  // portrait
   tft.fillScreen(random(0xFFFF));
