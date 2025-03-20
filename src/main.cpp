@@ -1,296 +1,138 @@
-/*
-  Example animated analogue meters using a ILI9341 TFT LCD screen
+/*====================================================================================
 
-  Needs Font 2 (also Font 4 if using large scale label)
+  This sketch demonstrates loading images which have been stored as files in the
+  built-in FLASH memory on a NodeMCU 1.0 (ESP8266 based, ESP-12E Module) or ESP32
+  board, rendering the images onto a ILI9341 SPI 320 x 240 pixel TFT screen.
 
-  Make sure all the display driver and pin connections are correct by
-  editing the User_Setup.h file in the TFT_eSPI library folder.
+  The images are stored in the SPI FLASH Filing System (SPIFFS), which effectively
+  functions like a tiny "hard drive". This filing system is built into the ESP8266
+  Core that can be loaded from the IDE "Boards manager" menu option. This is at
+  version 2.3.0 at the time of sketch creation.
 
-  #########################################################################
-  ###### DON'T FORGET TO UPDATE THE User_Setup.h FILE IN THE LIBRARY ######
-  #########################################################################
-*/
+  The size of the SPIFFS partition can be set in the IDE as 1Mbyte or 3Mbytes. Either
+  will work with this sketch. Typically most sketches easily fit within 1 Mbyte so a
+  3 Mbyte SPIFS partition can be used, in which case it can contain ~18 full screen
+  320 x 240 raw images (150 Kbytes each) or 100's of Jpeg full screem images.
 
-#include <Arduino.h>
-#include <TFT_eSPI.h> // Hardware-specific library
-#include <SPI.h>
+  The ESP8266 or ESP32 with the TFT and sketch works with the library here:
+  https://github.com/Bodmer/TFT_eSPI
 
-TFT_eSPI tft = TFT_eSPI();       // Invoke custom library
+  The Jpeg library can be found here:
+  https://github.com/Bodmer/JPEGDecoder
+ 
+  Images in the Jpeg format can be created using Paint or IrfanView or other picture
+  editting software.
 
-#define TFT_GREY 0x5AEB
+  Place the images inside the sketch folder, in a folder called "Data".  Then upload
+  all the files in the folder using the Arduino IDE "ESP8266 Sketch Data Upload" or
+  "ESP32 Sketch Data Upload" option in the "Tools" menu:
+  http://www.esp8266.com/viewtopic.php?f=32&t=10081
+  https://github.com/esp8266/arduino-esp8266fs-plugin/releases
 
-#define LOOP_PERIOD 35 // Display updates every 35 ms
+  https://github.com/me-no-dev/arduino-esp32fs-plugin
+  
+  Upload takes some time, but the SPIFFS content is not altered when a new sketch is
+  uploaded, so there is no need to upload the same files again!
+  Note: If open, you must close the "Serial Monitor" window to upload data to SPIFFS!
 
-float ltx = 0;    // Saved x coord of bottom of needle
-uint16_t osx = 120, osy = 120; // Saved x & y coords
-uint32_t updateTime = 0;       // time for next update
+  The IDE will not copy the "data" folder with the sketch if you save the sketch under
+  another name. It is necessary to manually make a copy and place it in the sketch
+  folder.
 
-int old_analog =  -999; // Value last displayed
-int old_digital = -999; // Value last displayed
+  The sketch may crash on an ESP32 if the jpeg file does not exist in the SPIFFS
 
-int value[6] = {0, 0, 0, 0, 0, 0};
-int old_value[6] = { -1, -1, -1, -1, -1, -1};
-int d = 0;
+  This sketch includes example images in the Data folder.
 
-// #########################################################################
-// Update needle position
-// This function is blocking while needle moves, time depends on ms_delay
-// 10ms minimises needle flicker if text is drawn within needle sweep area
-// Smaller values OK if text not in sweep area, zero for instant movement but
-// does not look realistic... (note: 100 increments for full scale deflection)
-// #########################################################################
-void plotNeedle(int value, byte ms_delay)
+  Saving images, uploading and rendering on the TFT screen couldn't be much easier!
+
+  The typical setup for a NodeMCU1.0 (ESP-12 Module) is :
+
+  Display SDO/MISO      to NodeMCU pin D6 <<<<<< This is not used by this sketch
+  Display LED           to NodeMCU pin  5V or 3.3V
+  Display SCK           to NodeMCU pin D5
+  Display SDI/MOSI      to NodeMCU pin D7
+  Display DC/RS (or AO) to NodeMCU pin D3
+  Display RESET         to NodeMCU pin D4 <<<<<< Or connect to NodeMCU RST pin
+  Display CS            to NodeMCU pin D8
+  Display GND           to NodeMCU pin GND (0V)
+  Display VCC           to NodeMCU pin 5V or 3.3V
+
+  Note: only some versions of the NodeMCU provide the USB 5V on the VIN pin
+  If 5V is not available at a pin you can use 3.3V but backlight brightness
+  will be lower.
+
+  If the TFT RESET signal is connected to the NodeMCU RST line then define the pin
+  in the TFT library User_Config.h file as negative so the library ignores it,
+  e.g. TFT_RST -1
+
+  Created by Bodmer 24th Jan 2017 - Tested in Arduino IDE 1.8.0 esp8266 Core 2.3.0
+  ==================================================================================*/
+
+//====================================================================================
+//                                  Libraries
+//====================================================================================
+
+#include <Arduino.h> // Needed for platformio
+
+// Call up the SPIFFS FLASH filing system this is part of the ESP Core
+#define FS_NO_GLOBALS
+#include <FS.h>
+
+#ifdef ESP32
+  #include "SPIFFS.h" // ESP32 only
+#endif
+
+// JPEG decoder library
+#include <JPEGDecoder.h>
+
+#include <TFT_eSPI.h>      // Hardware-specific library
+
+#include "JPEG_functions.h" // Include the support functions
+#include "SPIFFS_functions.h" // Include the support functions
+
+
+TFT_eSPI tft = TFT_eSPI(); // Invoke custom library
+
+//====================================================================================
+//                                    Setup
+//====================================================================================
+void setup()
 {
-  tft.setTextColor(TFT_BLACK, TFT_WHITE);
-  char buf[8]; dtostrf(value, 4, 0, buf);
-  tft.drawRightString(buf, 40, 119 - 20, 2);
+  Serial.begin(250000); // Used for messages and the C array generator
 
-  if (value < -10) value = -10; // Limit value to emulate needle end stops
-  if (value > 110) value = 110;
+  delay(10);
+  Serial.println("NodeMCU decoder test!");
 
-  // Move the needle util new value reached
-  while (!(value == old_analog)) {
-    if (old_analog < value) old_analog++;
-    else old_analog--;
-
-    if (ms_delay == 0) old_analog = value; // Update immediately id delay is 0
-
-    float sdeg = map(old_analog, -10, 110, -150, -30); // Map value to angle
-    // Calculate tip of needle coords
-    float sx = cos(sdeg * 0.0174532925);
-    float sy = sin(sdeg * 0.0174532925);
-
-    // Calculate x delta of needle start (does not start at pivot point)
-    float tx = tan((sdeg + 90) * 0.0174532925);
-
-    // Erase old needle image
-    tft.drawLine(120 + 20 * ltx - 1, 140 - 20, osx - 1, osy, TFT_WHITE);
-    tft.drawLine(120 + 20 * ltx, 140 - 20, osx, osy, TFT_WHITE);
-    tft.drawLine(120 + 20 * ltx + 1, 140 - 20, osx + 1, osy, TFT_WHITE);
-
-    // Re-plot text under needle
-    tft.setTextColor(TFT_BLACK);
-    tft.drawCentreString("%RH", 120, 70, 4); // // Comment out to avoid font 4
-
-    // Store new needle end coords for next erase
-    ltx = tx;
-    osx = sx * 98 + 120;
-    osy = sy * 98 + 140;
-
-    // Draw the needle in the new postion, magenta makes needle a bit bolder
-    // draws 3 lines to thicken needle
-    tft.drawLine(120 + 20 * ltx - 1, 140 - 20, osx - 1, osy, TFT_RED);
-    tft.drawLine(120 + 20 * ltx, 140 - 20, osx, osy, TFT_MAGENTA);
-    tft.drawLine(120 + 20 * ltx + 1, 140 - 20, osx + 1, osy, TFT_RED);
-
-    // Slow needle down slightly as it approaches new postion
-    if (abs(old_analog - value) < 10) ms_delay += ms_delay / 5;
-
-    // Wait before next update
-    delay(ms_delay);
-  }
-}
-
-// #########################################################################
-//  Draw a linear meter on the screen
-// #########################################################################
-void plotLinear(char *label, int x, int y)
-{
-  int w = 36;
-  tft.drawRect(x, y, w, 155, TFT_GREY);
-  tft.fillRect(x + 2, y + 19, w - 3, 155 - 38, TFT_WHITE);
-  tft.setTextColor(TFT_CYAN, TFT_BLACK);
-  tft.drawCentreString(label, x + w / 2, y + 2, 2);
-
-  for (int i = 0; i < 110; i += 10)
-  {
-    tft.drawFastHLine(x + 20, y + 27 + i, 6, TFT_BLACK);
-  }
-
-  for (int i = 0; i < 110; i += 50)
-  {
-    tft.drawFastHLine(x + 20, y + 27 + i, 9, TFT_BLACK);
-  }
-
-  tft.fillTriangle(x + 3, y + 127, x + 3 + 16, y + 127, x + 3, y + 127 - 5, TFT_RED);
-  tft.fillTriangle(x + 3, y + 127, x + 3 + 16, y + 127, x + 3, y + 127 + 5, TFT_RED);
-
-  tft.drawCentreString("---", x + w / 2, y + 155 - 18, 2);
-}
-
-// #########################################################################
-//  Adjust 6 linear meter pointer positions
-// #########################################################################
-void plotPointer(void)
-{
-  int dy = 187;
-  byte pw = 16;
-
-  tft.setTextColor(TFT_GREEN, TFT_BLACK);
-
-  // Move the 6 pointers one pixel towards new value
-  for (int i = 0; i < 6; i++)
-  {
-    char buf[8]; dtostrf(value[i], 4, 0, buf);
-    tft.drawRightString(buf, i * 40 + 36 - 5, 187 - 27 + 155 - 18, 2);
-
-    int dx = 3 + 40 * i;
-    if (value[i] < 0) value[i] = 0; // Limit value to emulate needle end stops
-    if (value[i] > 100) value[i] = 100;
-
-    while (!(value[i] == old_value[i])) {
-      dy = 187 + 100 - old_value[i];
-      if (old_value[i] > value[i])
-      {
-        tft.drawLine(dx, dy - 5, dx + pw, dy, TFT_WHITE);
-        old_value[i]--;
-        tft.drawLine(dx, dy + 6, dx + pw, dy + 1, TFT_RED);
-      }
-      else
-      {
-        tft.drawLine(dx, dy + 5, dx + pw, dy, TFT_WHITE);
-        old_value[i]++;
-        tft.drawLine(dx, dy - 6, dx + pw, dy - 1, TFT_RED);
-      }
-    }
-  }
-}
-
-// #########################################################################
-//  Draw the analogue meter on the screen
-// #########################################################################
-void analogMeter()
-{
-  // Meter outline
-  tft.fillRect(0, 0, 239, 126, TFT_GREY);
-  tft.fillRect(5, 3, 230, 119, TFT_WHITE);
-
-  tft.setTextColor(TFT_BLACK);  // Text colour
-
-  // Draw ticks every 5 degrees from -50 to +50 degrees (100 deg. FSD swing)
-  for (int i = -50; i < 51; i += 5) {
-    // Long scale tick length
-    int tl = 15;
-
-    // Coordinates of tick to draw
-    float sx = cos((i - 90) * 0.0174532925);
-    float sy = sin((i - 90) * 0.0174532925);
-    uint16_t x0 = sx * (100 + tl) + 120;
-    uint16_t y0 = sy * (100 + tl) + 140;
-    uint16_t x1 = sx * 100 + 120;
-    uint16_t y1 = sy * 100 + 140;
-
-    // Coordinates of next tick for zone fill
-    float sx2 = cos((i + 5 - 90) * 0.0174532925);
-    float sy2 = sin((i + 5 - 90) * 0.0174532925);
-    int x2 = sx2 * (100 + tl) + 120;
-    int y2 = sy2 * (100 + tl) + 140;
-    int x3 = sx2 * 100 + 120;
-    int y3 = sy2 * 100 + 140;
-
-    // Yellow zone limits
-    //if (i >= -50 && i < 0) {
-    //  tft.fillTriangle(x0, y0, x1, y1, x2, y2, TFT_YELLOW);
-    //  tft.fillTriangle(x1, y1, x2, y2, x3, y3, TFT_YELLOW);
-    //}
-
-    // Green zone limits
-    if (i >= 0 && i < 25) {
-      tft.fillTriangle(x0, y0, x1, y1, x2, y2, TFT_GREEN);
-      tft.fillTriangle(x1, y1, x2, y2, x3, y3, TFT_GREEN);
-    }
-
-    // Orange zone limits
-    if (i >= 25 && i < 50) {
-      tft.fillTriangle(x0, y0, x1, y1, x2, y2, TFT_ORANGE);
-      tft.fillTriangle(x1, y1, x2, y2, x3, y3, TFT_ORANGE);
-    }
-
-    // Short scale tick length
-    if (i % 25 != 0) tl = 8;
-
-    // Recalculate coords incase tick lenght changed
-    x0 = sx * (100 + tl) + 120;
-    y0 = sy * (100 + tl) + 140;
-    x1 = sx * 100 + 120;
-    y1 = sy * 100 + 140;
-
-    // Draw tick
-    tft.drawLine(x0, y0, x1, y1, TFT_BLACK);
-
-    // Check if labels should be drawn, with position tweaks
-    if (i % 25 == 0) {
-      // Calculate label positions
-      x0 = sx * (100 + tl + 10) + 120;
-      y0 = sy * (100 + tl + 10) + 140;
-      switch (i / 25) {
-        case -2: tft.drawCentreString("0", x0, y0 - 12, 2); break;
-        case -1: tft.drawCentreString("25", x0, y0 - 9, 2); break;
-        case 0: tft.drawCentreString("50", x0, y0 - 6, 2); break;
-        case 1: tft.drawCentreString("75", x0, y0 - 9, 2); break;
-        case 2: tft.drawCentreString("100", x0, y0 - 12, 2); break;
-      }
-    }
-
-    // Now draw the arc of the scale
-    sx = cos((i + 5 - 90) * 0.0174532925);
-    sy = sin((i + 5 - 90) * 0.0174532925);
-    x0 = sx * 100 + 120;
-    y0 = sy * 100 + 140;
-    // Draw scale arc, don't draw the last part
-    if (i < 50) tft.drawLine(x0, y0, x1, y1, TFT_BLACK);
-  }
-
-  tft.drawString("%RH", 5 + 230 - 40, 119 - 20, 2); // Units at bottom right
-  tft.drawCentreString("%RH", 120, 70, 4); // Comment out to avoid font 4
-  tft.drawRect(5, 3, 230, 119, TFT_BLACK); // Draw bezel line
-
-  plotNeedle(0, 0); // Put meter needle at 0
-}
-
-void setup(void) {
   tft.init();
-  tft.setRotation(0);
-  Serial.begin(57600); // For debug
-  tft.fillScreen(TFT_BLACK);
+  tft.setRotation(1);  // 0 & 2 Portrait. 1 & 3 landscape
+  tft.fillScreen(TFT_BLUE);
 
-  analogMeter(); // Draw analogue meter
-
-  // Draw 6 linear meters
-  byte d = 40;
-  plotLinear("A0", 0, 160);
-  plotLinear("A1", 1 * d, 160);
-  plotLinear("A2", 2 * d, 160);
-  plotLinear("A3", 3 * d, 160);
-  plotLinear("A4", 4 * d, 160);
-  plotLinear("A5", 5 * d, 160);
-
-  updateTime = millis(); // Next update time
-}
-
-
-void loop() {
-  if (updateTime <= millis()) {
-    updateTime = millis() + LOOP_PERIOD;
-
-    d += 4; if (d >= 360) d = 0;
-
-    //value[0] = map(analogRead(A0), 0, 1023, 0, 100); // Test with value form Analogue 0
-
-    // Create a Sine wave for testing
-    value[0] = 50 + 50 * sin((d + 0) * 0.0174532925);
-    value[1] = 50 + 50 * sin((d + 60) * 0.0174532925);
-    value[2] = 50 + 50 * sin((d + 120) * 0.0174532925);
-    value[3] = 50 + 50 * sin((d + 180) * 0.0174532925);
-    value[4] = 50 + 50 * sin((d + 240) * 0.0174532925);
-    value[5] = 50 + 50 * sin((d + 300) * 0.0174532925);
-
-    //unsigned long t = millis();
-
-    plotPointer();
-
-    plotNeedle(value[0], 0);
-
-    //Serial.println(millis()-t); // Print time taken for meter update
+  if (!SPIFFS.begin(true)) {
+    Serial.println("SPIFFS initialisation failed!");
+    while (1) {Serial.println("Still waiting..."); delay(1000);} // Stay here twiddling thumbs waiting
   }
+  Serial.println("\r\nInitialisation done.");
+  listFiles(); // Lists the files so you can see what is in the SPIFFS
+
 }
+
+//====================================================================================
+//                                    Loop
+//====================================================================================
+void loop()
+{
+  // Note the / before the SPIFFS file name must be present, this means the file is in
+  // the root directory of the SPIFFS, e.g. "/tiger.jpg" for a file called "tiger.jpg"
+
+  tft.setRotation(0);  // portrait
+  tft.fillScreen(random(0xFFFF));
+
+  drawJpeg("/happy-flower.jpg", 0 , 0);     // 240 x 320 image
+  //drawJpeg("/Baboon40.jpg", 0, 0); // 320 x 480 image
+  delay(2000);
+
+  //createArray("/tiger.jpg");
+  //delay(2000);
+  //while(1) yield(); // Stay here
+}
+//====================================================================================
