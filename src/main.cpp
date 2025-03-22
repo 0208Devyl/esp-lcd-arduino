@@ -112,7 +112,7 @@ void setup()
     while (1) {Serial.println("Still waiting..."); delay(1000);} // Stay here twiddling thumbs waiting
   }
   Serial.println("\r\nInitialisation done.");
-  listFiles(); // Lists the files so you can see what is in the SPIFFS
+  //listFiles(); // Lists the files so you can see what is in the SPIFFS
 
 }
 
@@ -126,9 +126,12 @@ void loop()
 
   tft.setRotation(0);  // portrait
   tft.fillScreen(random(0xFFFF));
-
-  drawJpeg("/happy-flower.jpg", 0 , 0);     // 240 x 320 image
+  delay(1000);
+  File file = SPIFFS.open("/happyflower.jpg");
+  Serial.write(file.read());
+  //drawJpeg("/happyflower.jpg", 0 , 0);     // 240 x 320 image
   //drawJpeg("/Baboon40.jpg", 0, 0); // 320 x 480 image
+  file.close();
   delay(2000);
 
   //createArray("/tiger.jpg");
