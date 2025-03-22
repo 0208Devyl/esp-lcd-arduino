@@ -16,7 +16,7 @@ void loop() {
     return;
   }
   
-  File file = SPIFFS.open("/happy-flower.jpg");
+  File file = SPIFFS.open("/littlefs/happyflower.jpg");
   if(!file){
     Serial.println("Failed to open file for reading");
     return;
